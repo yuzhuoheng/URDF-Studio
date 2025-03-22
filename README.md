@@ -118,7 +118,7 @@ git add dist/
 git commit -m "chore: update dist files"
 ```
 
-3. 构建并运行 Docker 镜像：
+3. 构建并运行 Docker 镜像：(构建镜像之前需要先npm run build )
 
 ```bash
 docker build -t urdf-server:v1.0 .
