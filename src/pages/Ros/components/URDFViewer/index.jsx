@@ -22,7 +22,7 @@ const URDFViewer = ({ jointStates }) => {
   return (
     <iframe
       ref={iframeRef}
-      src="/"
+      src="/urdf/online"
       style={{
         width: '100%',
         height: '100%',
