@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Foxglove Bridge Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #e6f7e6;
+            color: #52c41a;
+        }
+        .disconnected {
+            background-color: #fff1f0;
+            color: #f5222d;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            height: 300px;
+            overflow: auto;
+            background: #f5f5f5;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Foxglove Bridge Test</h2>
+    <div>
+        <select id="urlSelect" onchange="updateUrl()">
+            <option value="ws://192.168.8.157:9001">ws://192.168.8.157:9001</option>
+            <option value="ws://192.168.8.157:9001/foxglove">ws://192.168.8.157:9001/foxglove</option>
+            <option value="ws://192.168.8.157:9001/foxglove-websocket">ws://192.168.8.157:9001/foxglove-websocket</option>
+            <option value="ws://192.168.8.157:9001/socket">ws://192.168.8.157:9001/socket</option>
+        </select>
+        <input type="text" id="wsUrl" value="ws://192.168.8.157:9001" style="width: 300px;">
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+    <div id="status" class="disconnected">Disconnected</div>
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        let connectAttempts = 0;
+        const MAX_ATTEMPTS = 3;
+
+        function updateUrl() {
+            document.getElementById('wsUrl').value = document.getElementById('urlSelect').value;
+        }
+
+        function addLog(message, type = 'info') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.style.color = type === 'error' ? '#f5222d' : type === 'success' ? '#52c41a' : '#000';
+            entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const status = document.getElementById('status');
+            status.className = connected ? 'connected' : 'disconnected';
+            status.textContent = connected ? 'Connected' : 'Disconnected';
+        }
+
+        function connect() {
+            if (ws) {
+                addLog('Already connected', 'error');
+                return;
+            }
+
+            const url = document.getElementById('wsUrl').value;
+            connectAttempts++;
+            
+            try {
+                addLog(`Attempting to connect (attempt ${connectAttempts}/${MAX_ATTEMPTS})...`);
+                addLog(`WebSocket State: ${ws ? ws.readyState : 'Not created'}`);
+                
+                ws = new WebSocket(url);
+                
+                // 设置超时
+                const timeout = setTimeout(() => {
+                    if (ws && ws.readyState !== WebSocket.OPEN) {
+                        addLog('Connection timeout after 5 seconds', 'error');
+                        ws.close();
+                    }
+                }, 5000);
+
+                ws.onopen = () => {
+                    clearTimeout(timeout);
+                    updateStatus(true);
+                    addLog('Connected successfully', 'success');
+                    connectAttempts = 0;
+
+                    // 尝试不同的订阅格式
+                    const subscribeMessages = [
+                        {
+                            op: "subscribe",
+                            subscriptions: [{
+                                topic: "@/graph",
+                                encoding: "json"
+                            }]
+                        },
+                        {
+                            op: "subscribe",
+                            topic: "@/graph"
+                        }
+                    ];
+
+                    subscribeMessages.forEach((msg, index) => {
+                        setTimeout(() => {
+                            try {
+                                addLog(`Sending subscription message ${index + 1}`);
+                                ws.send(JSON.stringify(msg));
+                            } catch (error) {
+                                addLog(`Failed to send subscription ${index + 1}: ${error.message}`, 'error');
+                            }
+                        }, index * 1000);
+                    });
+                };
+
+                ws.onclose = (event) => {
+                    clearTimeout(timeout);
+                    updateStatus(false);
+                    addLog(`Connection closed: Code=${event.code}, Reason=${event.reason}, Clean=${event.wasClean}`);
+                    ws = null;
+
+                    // 自动重试
+                    if (connectAttempts < MAX_ATTEMPTS) {
+                        addLog(`Retrying in 2 seconds...`);
+                        setTimeout(connect, 2000);
+                    } else {
+                        addLog(`Max connection attempts reached`, 'error');
+                        connectAttempts = 0;
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    addLog(`WebSocket error: ${error.message || 'Unknown error'}`, 'error');
+                    addLog(`Current WebSocket State: ${ws.readyState}`);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        addLog(`Raw message received: ${event.data}`);
+                        const message = JSON.parse(event.data);
+                        addLog(`Parsed message: ${JSON.stringify(message, null, 2)}`);
+                    } catch (error) {
+                        addLog(`Failed to parse message: ${error.message}`, 'error');
+                    }
+                };
+
+            } catch (error) {
+                addLog(`Connection failed: ${error.message}`, 'error');
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateStatus(false);
+                addLog('Disconnected by user');
+                connectAttempts = 0;
+            }
+        }
+    </script>
+</body>
+</html> 

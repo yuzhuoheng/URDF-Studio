@@ -1,0 +1,81 @@
+.ros-page {
+  padding: 24px;
+  min-height: 100vh;
+
+  .connection-card {
+    background: linear-gradient(to right, #f0f2f5, #ffffff);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+    .ant-card-head {
+      border-bottom: 1px solid #f0f0f0;
+      padding: 0 24px;
+    }
+
+    .ant-form {
+      padding: 16px 0;
+    }
+  }
+
+  .topic-list {
+    .topic-list-header {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+
+
+      .topic-count {
+        color: rgba(0, 0, 0, 0.45);
+      }
+    }
+
+    .ant-table {
+      margin-top: 8px;
+    }
+  }
+
+  .content-card {
+    background: #fff;
+    border-radius: 4px;
+
+    .ant-tabs-nav {
+      margin-bottom: 16px;
+    }
+
+   
+
+    .message-viewer {
+      pre {
+        background: #f6f8fa;
+        padding: 12px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 13px;
+        margin: 0;
+      }
+    }
+
+    & + .content-card {
+      margin-top: 16px;
+    }
+  }
+
+  .urdf-viewer-card {
+    height: 100%;
+    
+    .ant-card-body {
+      padding: 12px;
+      height: calc(100% - 57px); // 减去卡片头部高度
+    }
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 20px;
+    
+    li {
+      margin: 8px 0;
+      color: rgba(0, 0, 0, 0.65);
+    }
+  }
+} 
