@@ -29,7 +29,7 @@ const TopicList = ({ topics, selectedTopics, onTopicSelect, onRefresh }) => {
       filters: [
         {
           text: '关节状态',
-          value: 'sensor_msgs/msg/JointState',
+          value: 'sensor_msgs/JointState',
         }
       ],
       onFilter: (value, record) => record.type === value,

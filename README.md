@@ -118,7 +118,7 @@ git add dist/
 git commit -m "chore: update dist files"
 ```
 
-3. 构建并运行 Docker 镜像：
+3. 构建并运行 Docker 镜像：(构建镜像之前需要先npm run build )
 
 ```bash
 docker build -t urdf-server:v1.0 .
@@ -171,6 +171,28 @@ iframe.contentWindow.postMessage({
     angle: 1.57
   }
 }, '*');
+```
+
+```javascript
+// 添加发送关节控制消息的函数
+const sendJointControl = (message: { name: string[]; position: Float64Array[] }): void => {
+  const iframeElement = document.querySelector("iframe");
+  if (iframeElement && iframeElement.contentWindow) {
+    // 发送每个关节的位置
+    const post_data = message.name.map((value: string, index: number) => ({
+      jointName: value,
+      angle: message.position[index],
+    }));
+
+    iframeElement.contentWindow.postMessage(
+      {
+        type: "UPDATE_JOINT",
+        data: post_data,
+      },
+      "*",
+    );
+  }
+};
 ```
 
 4. 设置视角:

@@ -75,7 +75,7 @@ class RosClient {
     this.ws.send(JSON.stringify({
       op: 'subscribe',
       topic: topic,
-      type: 'sensor_msgs/msg/JointState'
+      type: 'sensor_msgs/JointState'
     }));
   }
 

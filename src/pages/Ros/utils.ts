@@ -10,7 +10,7 @@ export const formatMessage = (message: any): string => {
  * 检查是否为 JointState 类型
  */
 export const isJointStateType = (type: string): boolean => {
-  return type === 'sensor_msgs/msg/JointState';
+  return type === 'sensor_msgs/JointState';
 };
 
 /**
