@@ -28,7 +28,7 @@ npm install
 yarn
 ```
 
-### 启动开发服务器
+### 启动（一般是8000端口）
 ```bash
 npm start
 # 或
