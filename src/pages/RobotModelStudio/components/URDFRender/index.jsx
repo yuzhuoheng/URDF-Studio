@@ -12,6 +12,7 @@ import { message } from 'antd';
 import readFile from '../../util';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { MessageHandler } from '@/utils/messageHandler';
+import dbService from '../../services/dbService';
 
 /**
  * URDF渲染器组件
@@ -54,7 +55,81 @@ class URDFRender extends Component {
 
     // 修改 fileMap 的存储方式
     this.fileMap = new Map(); // robotId -> Map<filename, blob>
+    
+    // 初始化数据库并加载状态
+    this.initData();
   }
+
+  /**
+   * 初始化数据
+   */
+  initData = async () => {
+    try {
+      // 初始化数据库
+      await dbService.init();
+      
+      // 加载保存的状态
+      await this.loadStateFromDB();
+    } catch (error) {
+      console.error('初始化数据失败:', error);
+    }
+  };
+
+  /**
+   * 从数据库加载状态
+   */
+  loadStateFromDB = async () => {
+    try {
+      const state = await dbService.getState();
+      if (state && state.urdfFiles) {
+        console.log('从数据库加载状态:', state);
+        
+        // 加载文件内容
+        const restoredFiles = [];
+        
+        for (const fileInfo of state.urdfFiles) {
+          const restoredFile = await dbService.restoreURDFFile(fileInfo);
+          if (restoredFile) {
+            restoredFiles.push(restoredFile);
+          }
+        }
+        
+        if (restoredFiles.length > 0) {
+          this.setState({
+            urdfFiles: restoredFiles,
+            sceneConfig: state.sceneConfig || this.state.sceneConfig
+          });
+          console.log(`已从数据库恢复 ${restoredFiles.length} 个模型`);
+        }
+      }
+    } catch (error) {
+      console.error('从数据库加载状态失败:', error);
+    }
+  };
+
+  /**
+   * 保存状态到数据库
+   */
+  saveStateToDB = async () => {
+    try {
+      const { urdfFiles, sceneConfig } = this.state;
+      
+      // 保存文件内容
+      for (const urdfFile of urdfFiles) {
+        await dbService.saveURDFFile(urdfFile);
+      }
+      
+      // 保存状态信息
+      await dbService.saveState({
+        urdfFiles: urdfFiles.map(({ id, name }) => ({ id, name })),
+        sceneConfig
+      });
+      
+      console.log('状态已保存到数据库');
+    } catch (error) {
+      console.error('保存状态到数据库失败:', error);
+    }
+  };
 
   /**
    * 初始化URDF加载器
@@ -225,20 +300,29 @@ class URDFRender extends Component {
    * 处理模型加载
    */
   handleModelLoad = async (urdfFiles, meshFiles) => {
-    this.setState(prevState => {
+    try {
+      // 创建新的URDF文件对象
       const newUrdfFiles = urdfFiles.map(file => ({
         ...file,
         id: file.id || `robot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         meshFiles
       }));
-
-      const existingNames = new Set(prevState.urdfFiles.map(f => f.name));
-      const uniqueNewFiles = newUrdfFiles.filter(file => !existingNames.has(file.name));
-
-      return {
-        urdfFiles: [...prevState.urdfFiles, ...uniqueNewFiles]
-      };
-    });
+      
+      // 更新状态
+      this.setState(prevState => {
+        const existingNames = new Set(prevState.urdfFiles.map(f => f.name));
+        const uniqueNewFiles = newUrdfFiles.filter(file => !existingNames.has(file.name));
+        
+        return {
+          urdfFiles: [...prevState.urdfFiles, ...uniqueNewFiles]
+        };
+      }, async () => {
+        // 保存到数据库
+        await this.saveStateToDB();
+      });
+    } catch (error) {
+      console.error('加载模型失败:', error);
+    }
   };
 
   handleUrdfToggle = async (urdfFile, isActive) => {
@@ -792,14 +876,19 @@ class URDFRender extends Component {
       if (this.state.activeUrdfFiles.find(f => f.id === urdfFile.id)) {
         this.handleUrdfToggle(urdfFile, false);
       }
-
+      
       // 从文件列表中移除
       this.setState(prevState => ({
         urdfFiles: prevState.urdfFiles.filter(f => f.id !== urdfFile.id)
-      }));
-
+      }), async () => {
+        // 从数据库中删除
+        await dbService.deleteURDFFile(urdfFile.id);
+        // 更新状态
+        await this.saveStateToDB();
+        message.success(`已删除模型 ${urdfFile.name}`);
+      });
     } catch (error) {
-      console.error('Error deleting URDF file:', error);
+      console.error('删除URDF文件失败:', error);
       message.error(`删除URDF文件 ${urdfFile.name} 失败`);
     }
   };
@@ -824,6 +913,32 @@ class URDFRender extends Component {
         }
       }
     }));
+  };
+
+  /**
+   * 清空所有模型
+   */
+  handleClearAll = async () => {
+    try {
+      // 停用所有激活的模型
+      this.state.activeUrdfFiles.forEach(file => {
+        this.handleUrdfToggle(file, false);
+      });
+      
+      // 清空状态
+      this.setState({
+        urdfFiles: [],
+        activeUrdfFiles: [],
+        robotsData: {}
+      }, async () => {
+        // 清空数据库
+        await dbService.clearAll();
+        message.success('已清空所有模型');
+      });
+    } catch (error) {
+      console.error('清空模型失败:', error);
+      message.error('清空模型失败');
+    }
   };
 
   render() {
@@ -853,6 +968,7 @@ class URDFRender extends Component {
                   activeUrdfFiles={activeUrdfFiles}
                   onUrdfToggle={this.handleUrdfToggle}
                   onUrdfDelete={this.handleUrdfDelete}
+                  onClearAll={this.handleClearAll}
                   extra={
                     <SceneController 
                       config={sceneConfig}

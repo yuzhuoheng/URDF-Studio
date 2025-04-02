@@ -53,6 +53,7 @@
     "antd": "^5.24.4",
     "antd-style": "^3.6.1",
     "classnames": "^2.5.1",
+    "idb": "^8.0.2",
     "omit.js": "^2.0.2",
     "querystring": "^0.2.1",
     "rc-menu": "^9.12.4",

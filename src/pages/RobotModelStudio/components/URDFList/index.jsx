@@ -1,18 +1,50 @@
 import React from 'react';
-import { Card, Switch, Space, Button, Empty } from 'antd';
-import { RobotOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Switch, Space, Button, Empty, Popconfirm, Tooltip } from 'antd';
+import { RobotOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { Typography } from 'antd';
 import './style.less';
 
 const { Text } = Typography;
 
-const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, extra }) => {
+/**
+ * URDF模型列表组件
+ * 显示所有可用的URDF模型，并提供切换、删除和清空功能
+ * 
+ * @param {Array} urdfFiles - 所有URDF文件列表
+ * @param {Array} activeUrdfFiles - 当前激活的URDF文件列表
+ * @param {Function} onUrdfToggle - 切换模型激活状态的回调
+ * @param {Function} onUrdfDelete - 删除模型的回调
+ * @param {Function} onClearAll - 清空所有模型的回调
+ * @param {ReactNode} extra - 额外的头部内容
+ */
+const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onClearAll, extra }) => {
   return (
     <Card 
       title="URDF模型列表" 
       size="small" 
       className="urdf-list-card"
-      extra={extra}
+      extra={
+        <Space>
+          {extra}
+          {urdfFiles.length > 0 && (
+            <Popconfirm
+              title="确定要清空所有模型吗？"
+              description="此操作将删除所有已保存的模型文件"
+              onConfirm={onClearAll}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Tooltip title="清空所有模型">
+                <Button 
+                  type="text" 
+                  danger
+                  icon={<ClearOutlined />}
+                />
+              </Tooltip>
+            </Popconfirm>
+          )}
+        </Space>
+      }
     >
       {urdfFiles.length > 0 ? (
         urdfFiles.map(urdfFile => {
