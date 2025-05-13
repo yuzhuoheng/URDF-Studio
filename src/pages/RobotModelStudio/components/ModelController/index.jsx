@@ -1,19 +1,33 @@
+import { EditOutlined, RobotOutlined } from '@ant-design/icons';
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Slider,
+  Space,
+  Tabs,
+  Typography,
+} from 'antd';
 import React, { useState } from 'react';
-import { Slider, InputNumber, Row, Col, Typography, Card, Tabs, Button, Modal, Form, Input, Space } from 'antd';
-import { RobotOutlined, EditOutlined } from '@ant-design/icons';
 import * as THREE from 'three';
 
 const { Text } = Typography;
 
-const ModelController = ({ 
-  title, 
-  joints, 
+const ModelController = ({
+  title,
+  joints,
   position = { x: 0, y: 0, z: 0 },
   rotation = { x: 0, y: 0, z: 0 },
   onJointChange,
   onPositionChange,
   onRotationChange,
-  onJointMappingChange
+  onJointMappingChange,
+  isStl,
 }) => {
   const [jointMappings, setJointMappings] = useState({});
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -33,7 +47,7 @@ const ModelController = ({
   const handleAddMapping = (values) => {
     const newMappings = {
       ...jointMappings,
-      [editingJoint]: values.mappedName
+      [editingJoint]: values.mappedName,
     };
     updateMappings(newMappings);
     setIsModalVisible(false);
@@ -51,7 +65,7 @@ const ModelController = ({
   const renderPositionControls = () => (
     <div className="controller-section">
       <Row align="middle" gutter={[16, 8]}>
-        {['x', 'y', 'z'].map(axis => (
+        {['x', 'y', 'z'].map((axis) => (
           <React.Fragment key={axis}>
             <Col span={2}>{axis.toUpperCase()}</Col>
             <Col span={14}>
@@ -82,7 +96,7 @@ const ModelController = ({
   const renderRotationControls = () => (
     <div className="controller-section">
       <Row align="middle" gutter={[16, 8]}>
-        {['x', 'y', 'z'].map(axis => (
+        {['x', 'y', 'z'].map((axis) => (
           <React.Fragment key={axis}>
             <Col span={2}>{axis.toUpperCase()}</Col>
             <Col span={14}>
@@ -90,7 +104,7 @@ const ModelController = ({
                 min={-180}
                 max={180}
                 step={1}
-                value={radToDeg(rotation[axis])}
+                value={rotation[axis]}
                 onChange={(value) => onRotationChange(axis, value)}
               />
             </Col>
@@ -99,7 +113,7 @@ const ModelController = ({
                 min={-180}
                 max={180}
                 style={{ width: '100%' }}
-                value={radToDeg(rotation[axis])}
+                value={rotation[axis]}
                 onChange={(value) => onRotationChange(axis, value)}
               />
             </Col>
@@ -160,75 +174,67 @@ const ModelController = ({
     });
   };
 
+  // 定义标签页项
   const items = [
     {
       key: 'position',
       label: '位置',
-      children: renderPositionControls()
+      children: renderPositionControls(),
     },
     {
       key: 'rotation',
       label: '旋转',
-      children: renderRotationControls()
-    },
-    {
-      key: 'joints',
-      label: '关节',
-      children: renderJointControls()
+      children: renderRotationControls(),
     },
   ];
 
-  return (
-    <>
-      <Card 
-        title={<><RobotOutlined />&ensp;{title}</>} 
-        size="small"
-      >
-        <Tabs
-          style={{ marginLeft: -16 }}
-          size="small"
-          defaultActiveKey="position"
-          items={items}
-          tabPosition="left"
-        />
-      </Card>
+  // 如果不是 STL 文件且有关节，添加关节控制标签页
+  if (!isStl && Object.keys(joints).length > 0) {
+    items.push({
+      key: 'joints',
+      label: '关节',
+      children: renderJointControls(),
+    });
+  }
 
+  return (
+    <Card
+      title={
+        <>
+          <RobotOutlined />
+          &ensp;{title}
+        </>
+      }
+      size="small"
+      style={{ marginBottom: 8 }}
+    >
+      <Tabs
+        style={{ marginLeft: -16 }}
+        size="small"
+        defaultActiveKey="position"
+        items={items}
+        tabPosition="left"
+      />
+
+      {/* 映射编辑模态框 */}
       <Modal
         title="编辑关节映射"
         open={isModalVisible}
+        onOk={() => form.submit()}
         onCancel={() => setIsModalVisible(false)}
-        footer={null}
       >
-        <Form form={form} onFinish={handleAddMapping}>
-          <Form.Item label="原始关节名">
-            <Input disabled value={editingJoint} />
-          </Form.Item>
+        <Form form={form} onFinish={handleAddMapping} layout="vertical">
           <Form.Item
             name="mappedName"
-            label="映射关节名"
-            rules={[{ required: true, message: '请输入映射关节名' }]}
+            label="映射名称"
+            rules={[{ required: true, message: '请输入映射名称' }]}
           >
-            <Input placeholder="例如: left_thumb_CMC" />
-          </Form.Item>
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">
-                确定
-              </Button>
-              {jointMappings[editingJoint] && (
-                <Button 
-                  danger 
-                  onClick={handleDeleteMapping}
-                >
-                  删除映射
-                </Button>
-              )}
-            </Space>
+            <Input placeholder="请输入映射名称" />
           </Form.Item>
         </Form>
       </Modal>
-    </>
+    </Card>
   );
 };
 
-export default ModelController; 
+export default ModelController;

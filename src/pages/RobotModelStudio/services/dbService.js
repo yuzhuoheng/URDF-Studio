@@ -1,17 +1,15 @@
-import { openDB } from 'idb';
-
 /**
  * URDF模型数据库服务
- * 用于管理模型数据的持久化存储
+ * 使用原生 IndexedDB API 而不是 idb 库
  */
 class URDFDatabaseService {
   constructor() {
-    this.dbPromise = null;
+    this.db = null;
     this.DB_NAME = 'urdfStudioDB';
     this.DB_VERSION = 2;
     this.STORES = {
       FILES: 'files',
-      STATE: 'state'
+      STATE: 'state',
     };
   }
 
@@ -19,35 +17,49 @@ class URDFDatabaseService {
    * 初始化数据库
    * @returns {Promise<IDBDatabase>} 数据库实例
    */
-  async init() {
-    if (!this.dbPromise) {
-      this.dbPromise = openDB(this.DB_NAME, this.DB_VERSION, {
-        upgrade: (db, oldVersion, newVersion, transaction) => {
-          // 删除旧的存储对象
-          if (oldVersion > 0) {
-            if (db.objectStoreNames.contains(this.STORES.FILES)) {
-              db.deleteObjectStore(this.STORES.FILES);
-            }
-            if (db.objectStoreNames.contains(this.STORES.STATE)) {
-              db.deleteObjectStore(this.STORES.STATE);
-            }
+  init() {
+    return new Promise((resolve, reject) => {
+      if (this.db) {
+        resolve(this.db);
+        return;
+      }
+
+      const request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+
+      request.onerror = (event) => {
+        console.error('数据库打开失败:', event.target.error);
+        reject(event.target.error);
+      };
+
+      request.onsuccess = (event) => {
+        this.db = event.target.result;
+        console.log('数据库初始化完成');
+        resolve(this.db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+
+        // 删除旧的存储对象
+        if (event.oldVersion > 0) {
+          if (db.objectStoreNames.contains(this.STORES.FILES)) {
+            db.deleteObjectStore(this.STORES.FILES);
           }
-          
-          // 创建新的存储对象
-          if (!db.objectStoreNames.contains(this.STORES.FILES)) {
-            db.createObjectStore(this.STORES.FILES, { keyPath: 'id' });
-          }
-          
-          if (!db.objectStoreNames.contains(this.STORES.STATE)) {
-            db.createObjectStore(this.STORES.STATE, { keyPath: 'id' });
+          if (db.objectStoreNames.contains(this.STORES.STATE)) {
+            db.deleteObjectStore(this.STORES.STATE);
           }
         }
-      });
-      
-      console.log('数据库初始化完成');
-    }
-    
-    return this.dbPromise;
+
+        // 创建新的存储对象
+        if (!db.objectStoreNames.contains(this.STORES.FILES)) {
+          db.createObjectStore(this.STORES.FILES, { keyPath: 'id' });
+        }
+
+        if (!db.objectStoreNames.contains(this.STORES.STATE)) {
+          db.createObjectStore(this.STORES.STATE, { keyPath: 'id' });
+        }
+      };
+    });
   }
 
   /**
@@ -55,10 +67,10 @@ class URDFDatabaseService {
    * @returns {Promise<IDBDatabase>} 数据库实例
    */
   async getDB() {
-    if (!this.dbPromise) {
+    if (!this.db) {
       await this.init();
     }
-    return this.dbPromise;
+    return this.db;
   }
 
   /**
@@ -69,27 +81,54 @@ class URDFDatabaseService {
   async saveURDFFile(urdfFile) {
     try {
       const db = await this.getDB();
-      
-      // 读取 URDF 文件内容
-      const urdfContent = await urdfFile.file.arrayBuffer();
-      
-      // 读取 mesh 文件内容
-      const meshContents = {};
-      if (urdfFile.meshFiles) {
-        for (const [fileName, file] of urdfFile.meshFiles) {
-          meshContents[fileName] = await file.arrayBuffer();
+
+      if (urdfFile.type === 'stl') {
+        // 保存 STL 文件
+        const content = await urdfFile.file.arrayBuffer();
+
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction([this.STORES.FILES], 'readwrite');
+          const store = transaction.objectStore(this.STORES.FILES);
+
+          const request = store.put({
+            id: urdfFile.id,
+            name: urdfFile.name,
+            type: 'stl',
+            content,
+            timestamp: Date.now(),
+          });
+
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      } else {
+        // 保存 URDF 文件
+        const urdfContent = await urdfFile.file.arrayBuffer();
+        const meshContents = {};
+
+        if (urdfFile.meshFiles) {
+          for (const [fileName, file] of urdfFile.meshFiles) {
+            meshContents[fileName] = await file.arrayBuffer();
+          }
         }
+
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction([this.STORES.FILES], 'readwrite');
+          const store = transaction.objectStore(this.STORES.FILES);
+
+          const request = store.put({
+            id: urdfFile.id,
+            name: urdfFile.name,
+            type: 'urdf',
+            urdfContent,
+            meshContents,
+            timestamp: Date.now(),
+          });
+
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
       }
-      
-      // 保存文件内容
-      await db.put(this.STORES.FILES, {
-        id: urdfFile.id,
-        name: urdfFile.name,
-        urdfContent,
-        meshContents
-      });
-      
-      console.log(`文件 ${urdfFile.id} 已保存到数据库`);
     } catch (error) {
       console.error(`保存文件 ${urdfFile.id} 失败:`, error);
       throw error;
@@ -104,8 +143,23 @@ class URDFDatabaseService {
   async deleteURDFFile(fileId) {
     try {
       const db = await this.getDB();
-      await db.delete(this.STORES.FILES, fileId);
-      console.log(`文件 ${fileId} 已从数据库删除`);
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([this.STORES.FILES], 'readwrite');
+        const store = transaction.objectStore(this.STORES.FILES);
+
+        const request = store.delete(fileId);
+
+        request.onsuccess = () => {
+          console.log(`文件 ${fileId} 已从数据库删除`);
+          resolve();
+        };
+
+        request.onerror = (event) => {
+          console.error(`删除文件 ${fileId} 失败:`, event.target.error);
+          reject(event.target.error);
+        };
+      });
     } catch (error) {
       console.error(`删除文件 ${fileId} 失败:`, error);
       throw error;
@@ -120,11 +174,26 @@ class URDFDatabaseService {
   async saveState(state) {
     try {
       const db = await this.getDB();
-      await db.put(this.STORES.STATE, {
-        id: 'current',
-        ...state
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([this.STORES.STATE], 'readwrite');
+        const store = transaction.objectStore(this.STORES.STATE);
+
+        const request = store.put({
+          id: 'current',
+          ...state,
+        });
+
+        request.onsuccess = () => {
+          console.log('应用状态已保存到数据库');
+          resolve();
+        };
+
+        request.onerror = (event) => {
+          console.error('保存应用状态失败:', event.target.error);
+          reject(event.target.error);
+        };
       });
-      console.log('应用状态已保存到数据库');
     } catch (error) {
       console.error('保存应用状态失败:', error);
       throw error;
@@ -138,8 +207,22 @@ class URDFDatabaseService {
   async getState() {
     try {
       const db = await this.getDB();
-      const state = await db.get(this.STORES.STATE, 'current');
-      return state;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([this.STORES.STATE], 'readonly');
+        const store = transaction.objectStore(this.STORES.STATE);
+
+        const request = store.get('current');
+
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+
+        request.onerror = (event) => {
+          console.error('获取应用状态失败:', event.target.error);
+          reject(event.target.error);
+        };
+      });
     } catch (error) {
       console.error('获取应用状态失败:', error);
       throw error;
@@ -154,8 +237,22 @@ class URDFDatabaseService {
   async getURDFFile(fileId) {
     try {
       const db = await this.getDB();
-      const fileData = await db.get(this.STORES.FILES, fileId);
-      return fileData;
+
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([this.STORES.FILES], 'readonly');
+        const store = transaction.objectStore(this.STORES.FILES);
+
+        const request = store.get(fileId);
+
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+
+        request.onerror = (event) => {
+          console.error(`获取文件 ${fileId} 失败:`, event.target.error);
+          reject(event.target.error);
+        };
+      });
     } catch (error) {
       console.error(`获取文件 ${fileId} 失败:`, error);
       throw error;
@@ -171,28 +268,46 @@ class URDFDatabaseService {
     try {
       const fileData = await this.getURDFFile(fileInfo.id);
       if (!fileData) return null;
-      
+
       // 还原 URDF 文件
-      const file = new File(
-        [fileData.urdfContent],
-        fileInfo.name,
-        { type: 'application/xml' }
-      );
-      
-      // 还原 mesh 文件
-      const meshFiles = new Map();
-      if (fileData.meshContents) {
-        for (const [fileName, content] of Object.entries(fileData.meshContents)) {
-          meshFiles.set(fileName, new File([content], fileName));
+      let file;
+      if (fileData.type === 'stl') {
+        // 处理 STL 文件
+        file = new File([fileData.content], fileInfo.name, {
+          type: 'model/stl',
+        });
+
+        return {
+          id: fileInfo.id,
+          name: fileInfo.name,
+          file,
+          type: 'stl',
+        };
+      } else {
+        // 处理 URDF 文件
+        file = new File([fileData.urdfContent], fileInfo.name, {
+          type: 'application/xml',
+        });
+
+        // 还原 mesh 文件
+        const meshFiles = new Map();
+        if (fileData.meshContents) {
+          for (const [fileName, content] of Object.entries(fileData.meshContents)) {
+            const meshFile = new File([content], fileName, {
+              type: fileName.toLowerCase().endsWith('.stl') ? 'model/stl' : 'model/collada',
+            });
+            meshFiles.set(fileName, meshFile);
+          }
         }
+
+        return {
+          id: fileInfo.id,
+          name: fileInfo.name,
+          file,
+          type: 'urdf',
+          meshFiles,
+        };
       }
-      
-      return {
-        id: fileInfo.id,
-        name: fileInfo.name,
-        file,
-        meshFiles
-      };
     } catch (error) {
       console.error(`还原文件 ${fileInfo.id} 失败:`, error);
       return null;
@@ -206,8 +321,28 @@ class URDFDatabaseService {
   async clearAll() {
     try {
       const db = await this.getDB();
-      await db.clear(this.STORES.FILES);
-      await db.clear(this.STORES.STATE);
+
+      const clearStore = (storeName) => {
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction([storeName], 'readwrite');
+          const store = transaction.objectStore(storeName);
+
+          const request = store.clear();
+
+          request.onsuccess = () => {
+            resolve();
+          };
+
+          request.onerror = (event) => {
+            console.error(`清空 ${storeName} 失败:`, event.target.error);
+            reject(event.target.error);
+          };
+        });
+      };
+
+      await clearStore(this.STORES.FILES);
+      await clearStore(this.STORES.STATE);
+
       console.log('数据库已清空');
     } catch (error) {
       console.error('清空数据库失败:', error);
@@ -219,4 +354,4 @@ class URDFDatabaseService {
 // 创建单例实例
 const dbService = new URDFDatabaseService();
 
-export default dbService; 
+export default dbService;

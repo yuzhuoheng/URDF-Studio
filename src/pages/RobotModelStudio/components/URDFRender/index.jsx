@@ -1,18 +1,17 @@
-import React, { Component, useEffect, useRef, useState } from 'react';
+import { MessageHandler } from '@/utils/messageHandler';
+import { Space, Splitter, message } from 'antd';
+import { Component } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import URDFLoader from 'urdf-loader';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader';
-import { Space, Splitter } from 'antd';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+import URDFLoader from 'urdf-loader';
+import dbService from '../../services/dbService';
+import readFile from '../../util';
 import FileUpload from '../FileUpload';
+import ModelController from '../ModelController';
 import SceneController from '../SceneController';
 import URDFList from '../URDFList';
-import ModelController from '../ModelController';
-import { message } from 'antd';
-import readFile from '../../util';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
-import { MessageHandler } from '@/utils/messageHandler';
-import dbService from '../../services/dbService';
 
 /**
  * URDF渲染器组件
@@ -32,7 +31,7 @@ class URDFRender extends Component {
         directionalIntensity: 1,
         backgroundColor: '#cccccc',
         showGrid: true,
-        shadows: true
+        shadows: true,
       },
       jointMappings: {},
     };
@@ -45,7 +44,7 @@ class URDFRender extends Component {
     this.mount = null;
     this.resizeObserver = null;
     this.animationFrameId = null;
-    
+
     // 添加光源实例
     this.ambientLight = null;
     this.directionalLight = null;
@@ -55,7 +54,7 @@ class URDFRender extends Component {
 
     // 修改 fileMap 的存储方式
     this.fileMap = new Map(); // robotId -> Map<filename, blob>
-    
+
     // 初始化数据库并加载状态
     this.initData();
   }
@@ -67,7 +66,7 @@ class URDFRender extends Component {
     try {
       // 初始化数据库
       await dbService.init();
-      
+
       // 加载保存的状态
       await this.loadStateFromDB();
     } catch (error) {
@@ -83,27 +82,33 @@ class URDFRender extends Component {
       const state = await dbService.getState();
       if (state && state.urdfFiles) {
         console.log('从数据库加载状态:', state);
-        
+
         // 加载文件内容
         const restoredFiles = [];
-        
+
         for (const fileInfo of state.urdfFiles) {
           const restoredFile = await dbService.restoreURDFFile(fileInfo);
           if (restoredFile) {
             restoredFiles.push(restoredFile);
+
+            // 如果文件之前是激活状态，自动加载它
+            if (state.activeUrdfFiles?.includes(fileInfo.id)) {
+              await this.handleUrdfToggle(restoredFile, true);
+            }
           }
         }
-        
+
         if (restoredFiles.length > 0) {
           this.setState({
             urdfFiles: restoredFiles,
-            sceneConfig: state.sceneConfig || this.state.sceneConfig
+            sceneConfig: state.sceneConfig || this.state.sceneConfig,
           });
           console.log(`已从数据库恢复 ${restoredFiles.length} 个模型`);
         }
       }
     } catch (error) {
       console.error('从数据库加载状态失败:', error);
+      message.error('从数据库加载状态失败');
     }
   };
 
@@ -112,22 +117,24 @@ class URDFRender extends Component {
    */
   saveStateToDB = async () => {
     try {
-      const { urdfFiles, sceneConfig } = this.state;
-      
+      const { urdfFiles, sceneConfig, activeUrdfFiles } = this.state;
+
       // 保存文件内容
       for (const urdfFile of urdfFiles) {
         await dbService.saveURDFFile(urdfFile);
       }
-      
+
       // 保存状态信息
       await dbService.saveState({
-        urdfFiles: urdfFiles.map(({ id, name }) => ({ id, name })),
-        sceneConfig
+        urdfFiles: urdfFiles.map(({ id, name, type }) => ({ id, name, type })),
+        activeUrdfFiles: activeUrdfFiles.map((file) => file.id),
+        sceneConfig,
       });
-      
+
       console.log('状态已保存到数据库');
     } catch (error) {
       console.error('保存状态到数据库失败:', error);
+      message.error('保存状态到数据库失败');
     }
   };
 
@@ -156,7 +163,7 @@ class URDFRender extends Component {
       loader = new STLLoader(manager);
       loader.load(
         path,
-        geometry => {
+        (geometry) => {
           const material = new THREE.MeshPhongMaterial();
           const mesh = new THREE.Mesh(geometry, material);
           const scene = new THREE.Scene();
@@ -164,24 +171,24 @@ class URDFRender extends Component {
           onComplete(scene);
         },
         undefined,
-        err => {
+        (err) => {
           console.error('加载错误:', err);
           onComplete(null, err);
-        }
+        },
       );
     } else {
       // 默认使用 ColladaLoader
       loader = new ColladaLoader(manager);
       loader.load(
         path,
-        result => {
+        (result) => {
           onComplete(result.scene);
         },
         undefined,
-        err => {
+        (err) => {
           console.error('加载错误:', err);
           onComplete(null, err);
-        }
+        },
       );
     }
   };
@@ -197,7 +204,7 @@ class URDFRender extends Component {
     this.initControls();
     this.initResizeObserver();
     this.animate();
-    
+
     // 初始化消息处理器
     this.messageHandler = new MessageHandler(this);
 
@@ -210,11 +217,11 @@ class URDFRender extends Component {
         this.handleJointUpdate(message.data);
       } else if (message.type === 'UPDATE_JOINT_MAPPING') {
         // 更新关节映射
-        this.setState(prevState => ({
+        this.setState((prevState) => ({
           jointMappings: {
             ...prevState.jointMappings,
-            ...message.data
-          }
+            ...message.data,
+          },
         }));
       }
     };
@@ -255,7 +262,7 @@ class URDFRender extends Component {
         }
         if (object.material) {
           if (Array.isArray(object.material)) {
-            object.material.forEach(material => material.dispose());
+            object.material.forEach((material) => material.dispose());
           } else {
             object.material.dispose();
           }
@@ -264,8 +271,8 @@ class URDFRender extends Component {
     }
 
     // 清理文件映射和 Blob URLs
-    this.fileMap.forEach(robotFiles => {
-      robotFiles.forEach(blobUrl => {
+    this.fileMap.forEach((robotFiles) => {
+      robotFiles.forEach((blobUrl) => {
         if (typeof blobUrl === 'string' && blobUrl.startsWith('blob:')) {
           URL.revokeObjectURL(blobUrl);
         }
@@ -286,7 +293,7 @@ class URDFRender extends Component {
 
   componentWillUnmount() {
     this.cleanupThreeJS();
-    
+
     // 清理消息处理器
     if (this.messageHandler) {
       this.messageHandler.destroy();
@@ -302,58 +309,136 @@ class URDFRender extends Component {
   handleModelLoad = async (urdfFiles, meshFiles) => {
     try {
       // 创建新的URDF文件对象
-      const newUrdfFiles = urdfFiles.map(file => ({
+      const newUrdfFiles = urdfFiles.map((file) => ({
         ...file,
         id: file.id || `robot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        meshFiles
+        meshFiles,
       }));
-      
+
       // 更新状态
-      this.setState(prevState => {
-        const existingNames = new Set(prevState.urdfFiles.map(f => f.name));
-        const uniqueNewFiles = newUrdfFiles.filter(file => !existingNames.has(file.name));
-        
-        return {
-          urdfFiles: [...prevState.urdfFiles, ...uniqueNewFiles]
-        };
-      }, async () => {
-        // 保存到数据库
-        await this.saveStateToDB();
-      });
+      this.setState(
+        (prevState) => {
+          const existingNames = new Set(prevState.urdfFiles.map((f) => f.name));
+          const uniqueNewFiles = newUrdfFiles.filter((file) => !existingNames.has(file.name));
+
+          return {
+            urdfFiles: [...prevState.urdfFiles, ...uniqueNewFiles],
+          };
+        },
+        async () => {
+          // 保存到数据库
+          await this.saveStateToDB();
+        },
+      );
     } catch (error) {
       console.error('加载模型失败:', error);
     }
   };
 
   handleUrdfToggle = async (urdfFile, isActive) => {
+    // 处理 STL 文件
+    if (urdfFile.type === 'stl') {
+      try {
+        if (isActive) {
+          // 创建 Blob URL
+          const blobUrl = URL.createObjectURL(urdfFile.file);
+
+          // 加载 STL
+          const loader = new STLLoader();
+          const geometry = await new Promise((resolve, reject) => {
+            loader.load(
+              blobUrl,
+              (geometry) => resolve(geometry),
+              undefined,
+              (error) => reject(error),
+            );
+          });
+
+          // 创建材质和网格
+          const material = new THREE.MeshPhongMaterial({
+            color: 0xaaaaaa,
+            specular: 0x111111,
+            shininess: 200,
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+
+          // 直接添加到场景，不进行居中处理
+          this.scene.add(mesh);
+
+          // 更新状态
+          this.setState((prevState) => ({
+            activeUrdfFiles: [...prevState.activeUrdfFiles, urdfFile],
+            robotsData: {
+              ...prevState.robotsData,
+              [urdfFile.id]: {
+                mesh,
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+              },
+            },
+          }));
+
+          // 释放 Blob URL
+          URL.revokeObjectURL(blobUrl);
+        } else {
+          // 移除模型
+          const robotData = this.state.robotsData[urdfFile.id];
+          if (robotData && robotData.mesh) {
+            this.scene.remove(robotData.mesh);
+            // 清理资源
+            if (robotData.mesh.geometry) {
+              robotData.mesh.geometry.dispose();
+            }
+            if (robotData.mesh.material) {
+              robotData.mesh.material.dispose();
+            }
+          }
+
+          // 更新状态
+          this.setState((prevState) => ({
+            activeUrdfFiles: prevState.activeUrdfFiles.filter((f) => f.id !== urdfFile.id),
+            robotsData: {
+              ...prevState.robotsData,
+              [urdfFile.id]: undefined,
+            },
+          }));
+        }
+      } catch (error) {
+        console.error('Error in handleStlToggle:', error);
+        message.error(`加载STL文件 ${urdfFile.name} 失败: ${error.message}`);
+      }
+      return;
+    }
+
+    // 原有的 URDF 处理逻辑
     if (isActive) {
       try {
         this.currentLoadingRobotId = urdfFile.id;
-        
+
         if (!this.fileMap.has(urdfFile.id)) {
           const robotFiles = new Map();
-          
+
           if (urdfFile.meshFiles) {
             for (const [filename, file] of urdfFile.meshFiles) {
               const blobUrl = URL.createObjectURL(file);
               robotFiles.set(filename, blobUrl);
             }
           }
-          
+
           this.fileMap.set(urdfFile.id, robotFiles);
         }
 
         const urdfContent = await readFile(urdfFile.file);
         const robot = this.loader.parse(urdfContent);
         const joints = this.initializeJoints(robot);
-        
+
         // 设置初始位置和旋转
         robot.position.set(0, 0, 0);
         robot.rotation.set(0, 0, 0);
-        
+
         this.scene.add(robot);
-        
-        this.setState(prevState => ({
+
+        this.setState((prevState) => ({
           activeUrdfFiles: [...prevState.activeUrdfFiles, urdfFile],
           robotsData: {
             ...prevState.robotsData,
@@ -361,24 +446,26 @@ class URDFRender extends Component {
               robot,
               joints,
               position: { x: 0, y: 0, z: 0 },
-              rotation: { x: 0, y: 0, z: 0 }
-            }
-          }
+              rotation: { x: 0, y: 0, z: 0 },
+            },
+          },
         }));
 
         // 发送机器人加载成功的消息
-        window.parent.postMessage({
-          type: 'ROBOT_LOADED',
-          data: {
-            robotId: urdfFile.id,
-            name: urdfFile.name,
-            joints: Object.keys(joints)
-          }
-        }, '*');
-
+        window.parent.postMessage(
+          {
+            type: 'ROBOT_LOADED',
+            data: {
+              robotId: urdfFile.id,
+              name: urdfFile.name,
+              joints: Object.keys(joints),
+            },
+          },
+          '*',
+        );
       } catch (error) {
         console.error('Error in handleUrdfToggle:', error);
-        message.error(`加载URDF文件 ${urdfFile.name} 失败`);
+        message.error(`加载URDF文件 ${urdfFile.name} 失败: ${error.message}`);
       } finally {
         this.currentLoadingRobotId = null;
       }
@@ -387,25 +474,25 @@ class URDFRender extends Component {
       const robotFiles = this.fileMap.get(urdfFile.id);
       if (robotFiles) {
         // 释放所有的 Blob URLs
-        robotFiles.forEach(blobUrl => {
+        robotFiles.forEach((blobUrl) => {
           if (typeof blobUrl === 'string' && blobUrl.startsWith('blob:')) {
             URL.revokeObjectURL(blobUrl);
           }
         });
       }
       this.fileMap.delete(urdfFile.id);
-      
+
       const robotData = this.state.robotsData[urdfFile.id];
       if (robotData && robotData.robot) {
         this.scene.remove(robotData.robot);
       }
-      
-      this.setState(prevState => ({
-        activeUrdfFiles: prevState.activeUrdfFiles.filter(f => f.id !== urdfFile.id),
+
+      this.setState((prevState) => ({
+        activeUrdfFiles: prevState.activeUrdfFiles.filter((f) => f.id !== urdfFile.id),
         robotsData: {
           ...prevState.robotsData,
-          [urdfFile.id]: undefined
-        }
+          [urdfFile.id]: undefined,
+        },
       }));
     }
   };
@@ -420,9 +507,10 @@ class URDFRender extends Component {
     let joint = robotData.joints[jointName];
     if (!joint) {
       // 如果找不到原始关节，尝试查找是否有反向映射
-      const reverseMappings = Object.entries(robotData.jointMappings || {})
-        .find(([original, mapped]) => mapped === jointName);
-      
+      const reverseMappings = Object.entries(robotData.jointMappings || {}).find(
+        ([original, mapped]) => mapped === jointName,
+      );
+
       if (reverseMappings) {
         joint = robotData.joints[reverseMappings[0]];
       }
@@ -454,20 +542,20 @@ class URDFRender extends Component {
     }
 
     // 更新状态
-    this.setState(prevState => ({
+    this.setState((prevState) => ({
       robotsData: {
         ...prevState.robotsData,
-        [robotId]: robotData
-      }
+        [robotId]: robotData,
+      },
     }));
   };
 
   handleJointUpdate = (jointData) => {
     if (!this.scene) return;
 
-    jointData.forEach(joint => {
+    jointData.forEach((joint) => {
       const { jointName, angle } = joint;
-      
+
       // 遍历所有激活的机器人模型
       Object.entries(this.state.robotsData).forEach(([robotId, robotData]) => {
         if (!robotData || !robotData.robot) return;
@@ -493,9 +581,10 @@ class URDFRender extends Component {
 
           // 如果有反向映射也要检查
           if (!updated) {
-            const reverseMappings = Object.entries(robotData.jointMappings || {})
-              .filter(([_, mapped]) => mapped === jointName);
-            
+            const reverseMappings = Object.entries(robotData.jointMappings || {}).filter(
+              ([_, mapped]) => mapped === jointName,
+            );
+
             reverseMappings.forEach(([original]) => {
               if (robotData.joints[original]) {
                 robotData.robot.setJointValue(original, angle);
@@ -507,16 +596,16 @@ class URDFRender extends Component {
 
           if (updated) {
             // 更新状态以触发UI更新
-            this.setState(prevState => ({
+            this.setState((prevState) => ({
               robotsData: {
                 ...prevState.robotsData,
                 [robotId]: {
                   ...robotData,
                   joints: {
-                    ...robotData.joints
-                  }
-                }
-              }
+                    ...robotData.joints,
+                  },
+                },
+              },
             }));
 
             // 强制重新渲染场景
@@ -533,47 +622,59 @@ class URDFRender extends Component {
 
   handlePositionChange = (robotId, axis, value) => {
     const robotData = this.state.robotsData[robotId];
-    if (robotData && robotData.robot && value !== null && value !== undefined) {
+    if (!robotData) return;
+
+    // 获取要控制的对象（可能是 robot 或 mesh）
+    const target = robotData.robot || robotData.mesh;
+    if (!target) return;
+
+    if (value !== null && value !== undefined) {
       // 更新THREE.js对象的位置
-      robotData.robot.position[axis] = value;
-      
+      target.position[axis] = value;
+
       // 更新状态
-      this.setState(prevState => ({
+      this.setState((prevState) => ({
         robotsData: {
           ...prevState.robotsData,
           [robotId]: {
             ...robotData,
             position: {
               ...robotData.position,
-              [axis]: value
-            }
-          }
-        }
+              [axis]: value,
+            },
+          },
+        },
       }));
     }
   };
 
   handleRotationChange = (robotId, axis, value) => {
     const robotData = this.state.robotsData[robotId];
-    if (robotData && robotData.robot && value !== null && value !== undefined) {
+    if (!robotData) return;
+
+    // 获取要控制的对象（可能是 robot 或 mesh）
+    const target = robotData.robot || robotData.mesh;
+    if (!target) return;
+
+    if (value !== null && value !== undefined) {
       // 将角度转换为弧度
       const angleInRad = THREE.MathUtils.degToRad(value);
-      
+
       // 更新THREE.js对象的旋转
-      robotData.robot.rotation[axis] = angleInRad;
-      
+      target.rotation[axis] = angleInRad;
+
       // 更新状态
-      this.setState(prevState => ({
+      this.setState((prevState) => ({
         robotsData: {
           ...prevState.robotsData,
           [robotId]: {
             ...robotData,
             rotation: {
               ...robotData.rotation,
-              [axis]: angleInRad
-            }
-          }
-        }
+              [axis]: value, // 存储角度值而不是弧度值
+            },
+          },
+        },
       }));
     }
   };
@@ -618,7 +719,7 @@ class URDFRender extends Component {
   initCamera = () => {
     const { fov, cameraDistance } = this.state.sceneConfig;
     const aspect = this.mount.clientWidth / this.mount.clientHeight;
-    
+
     this.camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
     // 降低相机高度
     this.camera.position.set(cameraDistance * 0.7, cameraDistance * 0.7, cameraDistance * 0.7);
@@ -629,24 +730,24 @@ class URDFRender extends Component {
    * 初始化渲染器
    */
   initRenderer = () => {
-    this.renderer = new THREE.WebGLRenderer({ 
+    this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
     });
-    
+
     // 设置像素比
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    
+
     // 设置尺寸但不更新样式
     this.renderer.setSize(this.mount.clientWidth, this.mount.clientHeight, false);
-    
+
     // 启用阴影
     this.renderer.shadowMap.enabled = this.state.sceneConfig.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    
+
     this.mount.appendChild(this.renderer.domElement);
-    
+
     // 设置canvas样式
     const canvas = this.renderer.domElement;
     canvas.style.width = '100%';
@@ -659,20 +760,17 @@ class URDFRender extends Component {
    */
   initLights = () => {
     // 环境光
-    this.ambientLight = new THREE.AmbientLight(
-      0xffffff, 
-      this.state.sceneConfig.ambientIntensity
-    );
+    this.ambientLight = new THREE.AmbientLight(0xffffff, this.state.sceneConfig.ambientIntensity);
     this.scene.add(this.ambientLight);
 
     // 平行光（模拟太阳光）
     this.directionalLight = new THREE.DirectionalLight(
       0xffffff,
-      this.state.sceneConfig.directionalIntensity
+      this.state.sceneConfig.directionalIntensity,
     );
     this.directionalLight.position.set(5, 5, 5);
     this.directionalLight.castShadow = this.state.sceneConfig.shadows;
-    
+
     // 设置阴影参数
     if (this.state.sceneConfig.shadows) {
       this.directionalLight.shadow.mapSize.width = 1024;
@@ -680,7 +778,7 @@ class URDFRender extends Component {
       this.directionalLight.shadow.camera.near = 0.5;
       this.directionalLight.shadow.camera.far = 500;
     }
-    
+
     this.scene.add(this.directionalLight);
   };
 
@@ -699,7 +797,7 @@ class URDFRender extends Component {
    */
   initResizeObserver = () => {
     let resizeTimeout;
-    
+
     this.resizeObserver = new ResizeObserver(() => {
       // 使用防抖来避免频繁更新
       if (resizeTimeout) {
@@ -710,11 +808,11 @@ class URDFRender extends Component {
         if (this.mount && this.camera && this.renderer) {
           const width = this.mount.clientWidth;
           const height = this.mount.clientHeight;
-          
+
           // 更新相机
           this.camera.aspect = width / height;
           this.camera.updateProjectionMatrix();
-          
+
           // 更新渲染器
           this.renderer.setPixelRatio(window.devicePixelRatio);
           this.renderer.setSize(width, height, false); // 添加 false 参数避免修改 canvas 样式
@@ -740,8 +838,8 @@ class URDFRender extends Component {
           angle: 0,
           limits: {
             lower: THREE.MathUtils.radToDeg(joint.limit?.lower ?? -Math.PI),
-            upper: THREE.MathUtils.radToDeg(joint.limit?.upper ?? Math.PI)
-          }
+            upper: THREE.MathUtils.radToDeg(joint.limit?.upper ?? Math.PI),
+          },
         };
       }
     });
@@ -749,14 +847,17 @@ class URDFRender extends Component {
   };
 
   handleConfigChange = (key, value) => {
-    this.setState(prevState => ({
-      sceneConfig: {
-        ...prevState.sceneConfig,
-        [key]: value
-      }
-    }), () => {
-      this.updateSceneConfig();
-    });
+    this.setState(
+      (prevState) => ({
+        sceneConfig: {
+          ...prevState.sceneConfig,
+          [key]: value,
+        },
+      }),
+      () => {
+        this.updateSceneConfig();
+      },
+    );
   };
 
   /**
@@ -815,8 +916,8 @@ class URDFRender extends Component {
     const distance = sceneConfig.cameraDistance;
 
     // 重置相机位置和旋转
-    switch(view) {
-      case '+x': 
+    switch (view) {
+      case '+x':
         this.camera.position.set(distance, 0, 0);
         this.camera.up.set(0, 0, 1);
         break;
@@ -846,7 +947,7 @@ class URDFRender extends Component {
 
     // 让相机看向原点
     this.camera.lookAt(0, 0, 0);
-    
+
     // 更新控制器
     this.controls.target.set(0, 0, 0);
     this.controls.update();
@@ -855,17 +956,17 @@ class URDFRender extends Component {
   // 添加获取关节信息的方法
   getJointsInfo = () => {
     const { robotsData } = this.state;
-    return Object.values(robotsData).map(robot => ({
+    return Object.values(robotsData).map((robot) => ({
       joints: robot.joints,
       position: robot.position,
-      rotation: robot.rotation
+      rotation: robot.rotation,
     }));
-  }
+  };
 
   // 添加重置场景的方法
   resetScene = () => {
     // 实现重置逻辑
-  }
+  };
 
   /**
    * 处理模型删除
@@ -873,20 +974,23 @@ class URDFRender extends Component {
   handleUrdfDelete = (urdfFile) => {
     try {
       // 如果模型处于激活状态，先停用它
-      if (this.state.activeUrdfFiles.find(f => f.id === urdfFile.id)) {
+      if (this.state.activeUrdfFiles.find((f) => f.id === urdfFile.id)) {
         this.handleUrdfToggle(urdfFile, false);
       }
-      
+
       // 从文件列表中移除
-      this.setState(prevState => ({
-        urdfFiles: prevState.urdfFiles.filter(f => f.id !== urdfFile.id)
-      }), async () => {
-        // 从数据库中删除
-        await dbService.deleteURDFFile(urdfFile.id);
-        // 更新状态
-        await this.saveStateToDB();
-        message.success(`已删除模型 ${urdfFile.name}`);
-      });
+      this.setState(
+        (prevState) => ({
+          urdfFiles: prevState.urdfFiles.filter((f) => f.id !== urdfFile.id),
+        }),
+        async () => {
+          // 从数据库中删除
+          await dbService.deleteURDFFile(urdfFile.id);
+          // 更新状态
+          await this.saveStateToDB();
+          message.success(`已删除模型 ${urdfFile.name}`);
+        },
+      );
     } catch (error) {
       console.error('删除URDF文件失败:', error);
       message.error(`删除URDF文件 ${urdfFile.name} 失败`);
@@ -904,14 +1008,14 @@ class URDFRender extends Component {
   };
 
   handleJointMappingChange = (robotId, mappings) => {
-    this.setState(prevState => ({
+    this.setState((prevState) => ({
       robotsData: {
         ...prevState.robotsData,
         [robotId]: {
           ...prevState.robotsData[robotId],
-          jointMappings: mappings
-        }
-      }
+          jointMappings: mappings,
+        },
+      },
     }));
   };
 
@@ -921,20 +1025,23 @@ class URDFRender extends Component {
   handleClearAll = async () => {
     try {
       // 停用所有激活的模型
-      this.state.activeUrdfFiles.forEach(file => {
+      this.state.activeUrdfFiles.forEach((file) => {
         this.handleUrdfToggle(file, false);
       });
-      
+
       // 清空状态
-      this.setState({
-        urdfFiles: [],
-        activeUrdfFiles: [],
-        robotsData: {}
-      }, async () => {
-        // 清空数据库
-        await dbService.clearAll();
-        message.success('已清空所有模型');
-      });
+      this.setState(
+        {
+          urdfFiles: [],
+          activeUrdfFiles: [],
+          robotsData: {},
+        },
+        async () => {
+          // 清空数据库
+          await dbService.clearAll();
+          message.success('已清空所有模型');
+        },
+      );
     } catch (error) {
       console.error('清空模型失败:', error);
       message.error('清空模型失败');
@@ -958,11 +1065,11 @@ class URDFRender extends Component {
           {/* 控制面板 */}
           <Splitter.Panel collapsible>
             <div className="right-panel">
-              <div style={{height:424,paddingTop:8}}>
+              <div style={{ height: 468, paddingTop: 8 }}>
                 <FileUpload onChange={this.handleModelLoad} />
               </div>
 
-              <Space direction="vertical" style={{ width: '100%' }}>   
+              <Space direction="vertical" style={{ width: '100%' }}>
                 <URDFList
                   urdfFiles={urdfFiles}
                   activeUrdfFiles={activeUrdfFiles}
@@ -970,7 +1077,7 @@ class URDFRender extends Component {
                   onUrdfDelete={this.handleUrdfDelete}
                   onClearAll={this.handleClearAll}
                   extra={
-                    <SceneController 
+                    <SceneController
                       config={sceneConfig}
                       onConfigChange={this.handleConfigChange}
                       onViewChange={this.handleViewChange}
@@ -991,28 +1098,31 @@ class URDFRender extends Component {
    */
   renderModelControllers = () => {
     const { activeUrdfFiles, robotsData } = this.state;
-    
-    return activeUrdfFiles.map(urdfFile => {
+
+    return activeUrdfFiles.map((urdfFile) => {
       const robotData = robotsData[urdfFile.id] || {};
+      const isStl = urdfFile.type === 'stl';
+
       return (
         <ModelController
           key={urdfFile.id}
           title={urdfFile.name}
-          joints={robotData.joints || {}}
+          joints={isStl ? {} : robotData.joints || {}} // STL 文件没有关节
           position={robotData.position}
           rotation={robotData.rotation}
           onJointChange={(jointName, value) => {
-            this.handleJointChange(urdfFile.id, jointName, value)
+            if (!isStl) {
+              this.handleJointChange(urdfFile.id, jointName, value);
+            }
           }}
-          onPositionChange={(axis, value) =>
-            this.handlePositionChange(urdfFile.id, axis, value)
-          }
-          onRotationChange={(axis, value) =>
-            this.handleRotationChange(urdfFile.id, axis, value)
-          }
-          onJointMappingChange={(mappings) => 
-            this.handleJointMappingChange(urdfFile.id, mappings)
-          }
+          onPositionChange={(axis, value) => this.handlePositionChange(urdfFile.id, axis, value)}
+          onRotationChange={(axis, value) => this.handleRotationChange(urdfFile.id, axis, value)}
+          onJointMappingChange={(mappings) => {
+            if (!isStl) {
+              this.handleJointMappingChange(urdfFile.id, mappings);
+            }
+          }}
+          isStl={isStl} // 传递是否为 STL 文件的标志
         />
       );
     });

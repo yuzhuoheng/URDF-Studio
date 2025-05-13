@@ -1,7 +1,5 @@
-import React from 'react';
-import { Card, Switch, Space, Button, Empty, Popconfirm, Tooltip } from 'antd';
-import { RobotOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
-import { Typography } from 'antd';
+import { ClearOutlined, DeleteOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button, Card, Empty, Popconfirm, Space, Switch, Tooltip, Typography } from 'antd';
 import './style.less';
 
 const { Text } = Typography;
@@ -9,7 +7,7 @@ const { Text } = Typography;
 /**
  * URDF模型列表组件
  * 显示所有可用的URDF模型，并提供切换、删除和清空功能
- * 
+ *
  * @param {Array} urdfFiles - 所有URDF文件列表
  * @param {Array} activeUrdfFiles - 当前激活的URDF文件列表
  * @param {Function} onUrdfToggle - 切换模型激活状态的回调
@@ -17,11 +15,23 @@ const { Text } = Typography;
  * @param {Function} onClearAll - 清空所有模型的回调
  * @param {ReactNode} extra - 额外的头部内容
  */
-const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onClearAll, extra }) => {
+const URDFList = ({
+  urdfFiles,
+  activeUrdfFiles,
+  onUrdfToggle,
+  onUrdfDelete,
+  onClearAll,
+  extra,
+}) => {
   return (
-    <Card 
-      title="URDF模型列表" 
-      size="small" 
+    <Card
+      title={
+        <>
+          <RobotOutlined />
+          &ensp;模型列表
+        </>
+      }
+      size="small"
       className="urdf-list-card"
       extra={
         <Space>
@@ -35,11 +45,7 @@ const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onCl
               cancelText="取消"
             >
               <Tooltip title="清空所有模型">
-                <Button 
-                  type="text" 
-                  danger
-                  icon={<ClearOutlined />}
-                />
+                <Button type="text" danger icon={<ClearOutlined />} />
               </Tooltip>
             </Popconfirm>
           )}
@@ -47,13 +53,10 @@ const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onCl
       }
     >
       {urdfFiles.length > 0 ? (
-        urdfFiles.map(urdfFile => {
-          const isActive = activeUrdfFiles.some(f => f.id === urdfFile.id);
+        urdfFiles.map((urdfFile) => {
+          const isActive = activeUrdfFiles.some((f) => f.id === urdfFile.id);
           return (
-            <div 
-              key={urdfFile.id} 
-              className={`urdf-list-item ${isActive ? 'active' : ''}`}
-            >
+            <div key={urdfFile.id} className={`urdf-list-item ${isActive ? 'active' : ''}`}>
               <div className="urdf-list-item-content">
                 <RobotOutlined className={`robot-icon ${isActive ? 'active' : ''}`} />
                 <Text style={{ flex: 1 }}>{urdfFile.name}</Text>
@@ -86,11 +89,11 @@ const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onCl
               </Text>
             </Space>
           }
-          style={{ 
+          style={{
             margin: '20px 0',
             padding: '20px 0',
             backgroundColor: '#fafafa',
-            borderRadius: '4px'
+            borderRadius: '4px',
           }}
         />
       )}
@@ -98,4 +101,4 @@ const URDFList = ({ urdfFiles, activeUrdfFiles, onUrdfToggle, onUrdfDelete, onCl
   );
 };
 
-export default URDFList; 
+export default URDFList;
